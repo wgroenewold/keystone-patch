@@ -32,6 +32,40 @@ PROVIDERS = provider_api.ProviderAPIs
 ENFORCER = rbac_enforcer.RBACEnforcer
 
 
+def _check_credential_project_scope(token, oslo_context, credential):
+    """Enforce project boundary for delegated tokens.
+
+    Non-delegated tokens (password, totp, etc.) are not restricted here --
+    an admin with a regular token can legitimately manage credentials across
+    projects. Delegated tokens (trusts, application credentials, OAuth1) are
+    always bound to a single project at delegation time; only credentials
+    whose project_id exactly matches the token's project scope are in bounds.
+
+    Credentials with project_id=None (e.g. TOTP/MFA bindings) are treated as
+    out-of-scope for any delegated token: they are user-level secrets with no
+    project anchor, and a delegated token should never be able to enumerate,
+    read, or mutate them -- doing so would allow a stolen delegation token to
+    exfiltrate or destroy a user's MFA binding.
+    """
+    trust_id = getattr(oslo_context, 'trust_id', None)
+    app_cred_id = getattr(token, 'application_credential_id', None)
+    access_token_id = getattr(token, 'access_token_id', None)
+
+    if not (trust_id or app_cred_id or access_token_id):
+        return
+
+    token_project_id = oslo_context.project_id
+    cred_project_id = credential.get('project_id')
+
+    if cred_project_id != token_project_id:
+        raise exception.ForbiddenAction(
+            action=_(
+                'Credential project does not match the '
+                'project scope of the delegated token'
+            )
+        )
+
+
 def _build_target_enforcement():
     target = {}
     try:
@@ -124,8 +158,11 @@ class CredentialResource(ks_flask.ResourceBase):
                     action='identity:get_credential',
                     target_attr={'credential': cred}
                 )
+                _check_credential_project_scope(
+                    self.auth_context['token'], self.oslo_context, cred
+                )
                 filtered_refs.append(ref)
-            except exception.Forbidden:
+            except (exception.Forbidden, exception.ForbiddenAction):
                 pass
         refs = filtered_refs
         refs = [self._blob_to_json(r) for r in refs]
@@ -137,6 +174,9 @@ class CredentialResource(ks_flask.ResourceBase):
             build_target=_build_target_enforcement
         )
         credential = PROVIDERS.credential_api.get_credential(credential_id)
+        _check_credential_project_scope(
+            self.auth_context['token'], self.oslo_context, credential
+        )
         return self.wrap_member(self._blob_to_json(credential))
 
     def get(self, credential_id=None):
@@ -161,6 +201,8 @@ class CredentialResource(ks_flask.ResourceBase):
             self.auth_context['token'], 'application_credential_id', None)
         access_token_id = getattr(
             self.auth_context['token'], 'access_token_id', None)
+        token = self.auth_context['token']
+        _check_credential_project_scope(token, self.oslo_context, credential)
         ref = self._assign_unique_id(
             self._normalize_dict(credential),
             trust_id=trust_id, app_cred_id=app_cred_id,
@@ -189,7 +231,9 @@ class CredentialResource(ks_flask.ResourceBase):
             build_target=_build_target_enforcement
         )
         current = PROVIDERS.credential_api.get_credential(credential_id)
-
+        _check_credential_project_scope(
+            self.auth_context['token'], self.oslo_context, current
+        )
         credential = self.request_body_json.get('credential', {})
         validation.lazy_validate(schema.credential_update, credential)
         self._validate_blob_update_keys(current.copy(), credential.copy())
@@ -208,6 +252,10 @@ class CredentialResource(ks_flask.ResourceBase):
         ENFORCER.enforce_call(
             action='identity:delete_credential',
             build_target=_build_target_enforcement
+        )
+        credential = PROVIDERS.credential_api.get_credential(credential_id)
+        _check_credential_project_scope(
+            self.auth_context['token'], self.oslo_context, credential
         )
 
         return (PROVIDERS.credential_api.delete_credential(

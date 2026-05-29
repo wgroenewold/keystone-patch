@@ -125,6 +125,21 @@ applicable with the `sql` backend for the `[identity] driver`.
 """))
 
 
+allow_insecure_admin_trust_cross_project_credentials_access = cfg.BoolOpt(
+    'allow_insecure_admin_trust_cross_project_credentials_access',
+    default=False,
+    help="""
+INSECURE: When enabled, admin-role delegated tokens are allowed to access
+credentials outside their project scope. By default (False), delegated tokens
+can only access credentials whose project_id matches the token's project scope.
+Enable only if automated workflows (e.g. Mistral cron triggers) use admin-role
+trusts to access credentials across multiple projects. Enabling this weakens
+the isolation provided by the LP#2150089 fix. This option will be removed in
+a future release.
+""",
+)
+
+
 GROUP_NAME = __name__.split('.')[-1]
 ALL_OPTS = [
     disable_user_account_days_inactive,
@@ -135,7 +150,8 @@ ALL_OPTS = [
     minimum_password_age,
     password_regex,
     password_regex_description,
-    change_password_upon_first_use
+    change_password_upon_first_use,
+    allow_insecure_admin_trust_cross_project_credentials_access,
 ]
 
 
