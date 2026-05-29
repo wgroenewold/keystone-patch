@@ -58,6 +58,12 @@ def _check_credential_project_scope(token, oslo_context, credential):
     cred_project_id = credential.get('project_id')
 
     if cred_project_id != token_project_id:
+        if CONF.security_compliance.allow_insecure_admin_trust_cross_project_credentials_access:
+            try:
+                ENFORCER.enforce_call(action='admin_required')
+                return
+            except exception.ForbiddenAction:
+                pass
         raise exception.ForbiddenAction(
             action=_(
                 'Credential project does not match the '
@@ -238,8 +244,14 @@ class CredentialResource(ks_flask.ResourceBase):
         validation.lazy_validate(schema.credential_update, credential)
         self._validate_blob_update_keys(current.copy(), credential.copy())
         self._require_matching_id(credential)
+        # Also check the merged result to prevent a delegated token from
+        # moving a credential out of scope by changing project_id.
+        merged = dict(current, **credential)
+        _check_credential_project_scope(
+            self.auth_context['token'], self.oslo_context, merged
+        )
         # Check that the user hasn't illegally modified the owner or scope
-        target = {'credential': dict(current, **credential)}
+        target = {'credential': merged}
         ENFORCER.enforce_call(
             action='identity:update_credential', target_attr=target
         )

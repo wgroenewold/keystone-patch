@@ -159,7 +159,9 @@ class ResourceBase(ks_flask.ResourceBase):
             access_token = PROVIDERS.oauth_api.get_access_token(
                 cred_data['access_token_id'])
             roles = jsonutils.loads(access_token['role_ids'])
-            if cred_data['project_id'] != access_token['project_id']:
+            cred_project = cred_data.get('project_id')
+            token_project = access_token.get('project_id')
+            if not cred_project or not token_project or cred_project != token_project:
                 raise ks_exceptions.Unauthorized(
                     _(
                         'EC2 credential project does not match the '

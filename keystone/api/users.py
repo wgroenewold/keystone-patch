@@ -136,7 +136,19 @@ def _block_delegated_token(oslo_context, token):
 
 
 def _block_delegated_token_app_creds(oslo_context, token):
-    """Raise Forbidden if the token is a trust or OAuth1 delegation."""
+    """Raise Forbidden if the token is a trust or OAuth1 delegation.
+
+    Application credential tokens are intentionally NOT blocked here.
+    The unrestricted/restricted distinction for application credentials is a
+    documented feature handled separately by
+    _check_unrestricted_application_credential(). Blocking app-cred tokens
+    from managing app-creds would break legitimate use cases (e.g. an
+    unrestricted app-cred rotating itself).
+
+    Trust-scoped and OAuth1 tokens are blocked because they can create
+    persistent credentials that outlive the delegation's expiry, breaking
+    the audit trail.
+    """
     trust_id = getattr(oslo_context, 'trust_id', None)
     access_token_id = getattr(token, 'access_token_id', None)
     if trust_id or access_token_id:
@@ -599,6 +611,7 @@ class OAuth1AccessTokenRoleListResource(ks_flask.ResourceBase):
                  {access_token_id}/roles
         """
         ENFORCER.enforce_call(action='identity:list_access_token_roles')
+        _block_delegated_token(self.oslo_context, self.auth_context['token'])
         access_token = PROVIDERS.oauth_api.get_access_token(access_token_id)
         if access_token['authorizing_user_id'] != user_id:
             raise ks_exception.NotFound()
@@ -619,6 +632,7 @@ class OAuth1AccessTokenRoleResource(ks_flask.ResourceBase):
                  {access_token_id}/roles/{role_id}
         """
         ENFORCER.enforce_call(action='identity:get_access_token_role')
+        _block_delegated_token(self.oslo_context, self.auth_context['token'])
         access_token = PROVIDERS.oauth_api.get_access_token(access_token_id)
         if access_token['authorizing_user_id'] != user_id:
             raise ks_exception.Unauthorized(_('User IDs do not match'))
