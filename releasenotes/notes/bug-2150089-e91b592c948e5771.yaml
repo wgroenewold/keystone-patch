@@ -1,0 +1,33 @@
+---
+security:
+  - |
+    [`bug 2150089 <https://launchpad.net/bugs/2150089>`_]
+    Delegated tokens (trusts, application credentials, OAuth1 access tokens)
+    are now restricted to credentials whose ``project_id`` matches the token's
+    project scope. This closes a cross-project lateral movement vector where a
+    delegated token could read, modify, or delete credentials belonging to a
+    different project, including EC2 keys and TOTP/MFA seed bindings (which
+    have no project anchor and are now treated as out-of-scope for any
+    delegated token).
+  - |
+    [`bug 2150089 <https://launchpad.net/bugs/2150089>`_]
+    Trust-scoped and OAuth1 access-token-scoped tokens can no longer create,
+    list, read, or delete application credentials or access rules, nor list,
+    read, or delete OAuth1 access tokens (including their role sub-resources).
+    Such a delegation could otherwise mint persistent credentials that outlive
+    the delegation's expiry, breaking the accountability model. Application
+    credential tokens remain able to manage application credentials, governed
+    by the existing ``unrestricted`` flag.
+upgrade:
+  - |
+    [`bug 2150089 <https://launchpad.net/bugs/2150089>`_]
+    A new ``[security_compliance]`` option,
+    ``allow_insecure_admin_trust_cross_project_credentials_access`` (default
+    ``False``), provides an opt-in escape hatch for operators whose automated
+    workflows rely on admin-role delegated tokens accessing credentials across
+    multiple projects (e.g. Mistral cron triggers syncing EC2 credentials).
+    When enabled, the cross-project boundary is relaxed only for the
+    ``/v3/credentials`` endpoints and only for tokens that pass an
+    ``admin_required`` policy check. It does not relax the EC2 or application
+    credential delegation checks. The option is named to signal that enabling
+    it is insecure; migrate affected workflows away from it.
